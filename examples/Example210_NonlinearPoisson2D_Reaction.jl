@@ -1,4 +1,6 @@
-module NonlinearPoisson2D_Reaction
+# # 210: 2D Nonlinear Poisson with reaction
+
+module Example210_NonlinearPoisson2D_Reaction
 
 using Printf
 using VoronoiFVM
@@ -115,4 +117,8 @@ function main(;n=10,pyplot=false,verbose=false, dense=false)
     return u15
 end
 
+function test()
+    main(dense=false) ≈ 0.014566189535134827 &&
+        main(dense=true) ≈ 0.014566189535134827
+end
 end

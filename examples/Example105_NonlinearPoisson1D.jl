@@ -1,9 +1,16 @@
-# We wrap this example and all later ones
-# into a module structure. This allows to load
-# all of them at once into the REPL without name
-# clashes. We shouldn't forget the corresponding end
-# statement.
-module OneSpeciesNonlinearPoisson
+# # 105: 1D Nonlinear Poisson equation
+# 
+# Solve the nonlinear Poisson equation
+# 
+# ```math
+# -\nabla 0.01 \nabla u^2 + u^2 = 0.0001x
+# ```
+# in $\Omega=(0,1)$ with boundary condition $u(0)=1$ and $u(1)=0.5$.
+# 
+
+
+module Example105_NonlinearPoisson1D
+
 
 # This gives us he @printf macro (c-like output)
 using Printf
@@ -33,35 +40,34 @@ function main(;n=10,pyplot=false,verbose=false, dense=false)
 
     eps=1.0e-2
     
-    # Create a physics structure
-    physics=VoronoiFVM.Physics(
 
     # Flux function which describes the flux
     # between neigboring control volumes
     flux=function(f,u,edge,data)
         f[1]=eps*(u[1]^2-u[2]^2)
-    end,
+    end
 
 
     # Source term
     source=function(f,node,data)
         f[1]=1.0e-4*node.coord[1]
-    end,
+    end
 
     # Storage term (under the time derivative)
     storage=function(f,u,node,data)
         f[1]=u[1]
-    end,
-
+    end
+    
     # Reation term
     reaction=function(f,u,node,data)
         f[1]=u[1]^2
     end
-    )
+    # Create a physics structure
+    physics=VoronoiFVM.Physics(flux=flux,source=source,storage=storage,reaction=reaction)
+
 
     # Create a finite volume system - either
     # in the dense or  the sparse version.
-    # Need to provide the overall number of species here
     if dense
         sys=VoronoiFVM.DenseSystem(grid,physics)
     else
@@ -116,6 +122,11 @@ function main(;n=10,pyplot=false,verbose=false, dense=false)
     return test_result
 end
 
+
+function test()
+   main(dense=false) ≈ 0.3371249631439964 &&
+       main(dense=true) ≈ 0.3371249631439964
+end
 
 end # Yes, this is *that* end (of the module...)
 

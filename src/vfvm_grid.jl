@@ -130,6 +130,11 @@ struct Grid{Tc} <: AbstractGrid
 
 end
 
+function Base.show(io::IO,grid::Grid{Tc}) where Tc
+    str=@sprintf("%s(dim_space=%d, num_nodes=%d, num_cells=%d, num_bfaces=%d)",
+                 typeof(grid),dim_space(grid),num_nodes(grid), num_cells(grid), num_bfaces(grid))
+    println(io,str)
+end
 
 ##########################################################
 """
@@ -365,9 +370,9 @@ function cellmask!(grid::Grid,
                    maskmin::AbstractArray,
                    maskmax::AbstractArray,
                    ireg::Int;
-                   eps=1.0e-10)
-    xmaskmin=maskmin.-eps
-    xmaskmax=maskmax.+eps
+                   tol=1.0e-10)
+    xmaskmin=maskmin.-tol
+    xmaskmax=maskmax.+tol
     for icell=1:num_cells(grid)
         in_region=true
         for inode=1:num_nodes_per_cell(grid)
@@ -399,12 +404,12 @@ function bfacemask!(grid::Grid,
                     maskmin::AbstractArray,
                     maskmax::AbstractArray,
                     ireg::Int;
-                    eps=1.0e-10)
+                    tol=1.0e-10)
 
     
     
-    xmaskmin=maskmin.-eps
-    xmaskmax=maskmax.+eps
+    xmaskmin=maskmin.-tol
+    xmaskmax=maskmax.+tol
     
     function isbface(ix)
         for ibface=1:num_bfaces(grid)

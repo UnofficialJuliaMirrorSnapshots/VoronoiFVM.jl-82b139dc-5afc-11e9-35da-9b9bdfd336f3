@@ -1,4 +1,6 @@
-module NonlinearPoisson2D_BoundarySpecies
+# # 220: 2D Nonlinear Poisson with boundary reaction and boundary species
+
+module Example220_NonlinearPoisson2D_BoundarySpecies
 
 using Printf
 using VoronoiFVM
@@ -7,9 +9,6 @@ using VoronoiFVM
 if isinteractive()
     using PyPlot
 end
-
-
-
 
 function main(;n=10,pyplot=false,verbose=false,dense=false)
     
@@ -125,5 +124,10 @@ function main(;n=10,pyplot=false,verbose=false,dense=false)
         end
     end
     return u5
+end
+
+function test()
+    main() ≈ 0.0020781361856598
+    main(dense=true) ≈ 0.0020781361856598
 end
 end
