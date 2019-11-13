@@ -859,17 +859,27 @@ end
 
 
 function _fill!(edge::Edge{Tv},grid::Grid{Tv},iedge,icell) where Tv
-    K=celledgenode(grid,1,iedge,icell)
-    L=celledgenode(grid,2,iedge,icell)
+    K=0
+    L=0
+    # If we work with projections of fluxes onto edges,
+    # we need to ensure that the edges are accessed with the
+    # same orientation without regard of the orientation induced
+    # by local cell numbering
+    if num_edges(grid)>0
+        edge.index=celledge(grid,iedge,icell)
+        K=grid.edgenodes[1,edge.index]
+        L=grid.edgenodes[2,edge.index]
+    else
+        edge.index=0
+        K=celledgenode(grid,1,iedge,icell)
+        L=celledgenode(grid,2,iedge,icell)
+    end
     edge.region=grid.cellregions[icell]
-    edge.index=iedge
     edge.nodeK=K
     edge.nodeL=L
     edge.icell=icell
-    for i=1:length(edge.coordK)
-        edge.coordK[i]=grid.coord[i,K]
-        edge.coordL[i]=grid.coord[i,L]
-    end
+    @. @inbounds @views edge.coordK=grid.coord[:,K]
+    @. @inbounds @views edge.coordL=grid.coord[:,L]
 end
 
 
@@ -888,13 +898,12 @@ $(TYPEDSIGNATURES)
 Calculate the length of an edge. 
 """
 function edgelength(edge::Edge{Tv}) where Tv
-    l::Tv
-    l=0.0
+    l::Tv=0.0
     for i=1:length(edge.coordK)
         d=edge.coordK[i]-edge.coordL[i]
         l=l+d*d
     end
-    return l
+    return sqrt(l)
 end
 
 """

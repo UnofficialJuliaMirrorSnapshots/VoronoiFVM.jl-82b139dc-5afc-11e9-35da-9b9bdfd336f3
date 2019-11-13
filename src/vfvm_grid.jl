@@ -1,6 +1,6 @@
 ##########################################################
 """
-$(TYPEDEF)
+    $(TYPEDEF)
 
 Abstract type for grid like datastructures [`VoronoiFVM.Grid`](@ref) and [`VoronoiFVM.SubGrid`](@ref).
 """
@@ -39,6 +39,14 @@ num_cells(grid::AbstractGrid)= size(grid.cellnodes,2)
 """
 $(TYPEDSIGNATURES)
 
+Number of edges in grid
+"""
+num_edges(grid::AbstractGrid)= size(grid.edgenodes,2)
+
+##########################################################
+"""
+$(TYPEDSIGNATURES)
+
 Return index of i-th local node in cell icell
 """
 cellnode(grid::AbstractGrid,inode,icell)=grid.cellnodes[inode,icell]
@@ -67,9 +75,17 @@ Return element type of grid coordinates.
 """
 Base.eltype(grid::AbstractGrid)=Base.eltype(grid.coord)
 
+
+
+##########################################################
+@enum CoordType begin
+    cartesian=1
+    cylindrical=2
+end
+
 ##########################################################
 """
-$(TYPEDEF)
+#$(TYPEDEF)
 
 Structure holding grid data. It is parametrised by the
 type Tc of coordinates.
@@ -77,7 +93,7 @@ type Tc of coordinates.
 $(TYPEDFIELDS)
 
 """
-struct Grid{Tc} <: AbstractGrid
+mutable struct Grid{Tc,Ti} <: AbstractGrid
 
     """ 
     2D Array of node coordinates
@@ -88,53 +104,132 @@ struct Grid{Tc} <: AbstractGrid
     """
     2D Array of node indices per grid cell
     """
-    cellnodes::Array{Int32,2}
+    cellnodes::Array{Ti,2}
 
+    """
+    Array of edge indices per grid cell.
+    Instatiated with prepare_edges!(grid)
+    """
+    celledges::Array{Ti,2}
+
+    """
+    Array of cell indices per grid edge.
+    The number of these indices may be less than 
+    the number of columns in this array. Nonexisting 
+    indices are set to 0
+    Instatiated with prepare_edges!(grid)
+    """
+    edgecells::Array{Ti,2}
+
+    """
+    Array of node indices per grid edge.
+    Instatiated with prepare_edges!(grid)
+    """
+    edgenodes::Array{Ti,2}
     
     """
     Array of cell region numbers
     """
-    cellregions::Array{Int32,1}
+    cellregions::Array{Ti,1}
 
     
     """
     2D Array of node indices per boundary face
     """
-    bfacenodes::ElasticArray{Int32,2,1}      
+    bfacenodes::Array{Ti,2}      
 
     
     """
     Array of boundary face region numbers
     """
-    bfaceregions::Array{Int32,1}
+    bfaceregions::Array{Ti,1}
 
     
     """
-    Number of inner cell regions. Stored in an array in order
-    to keep the struct immutable.
+    Number of inner cell regions.
     """
-    num_cellregions::Array{Int32,1}
+    num_cellregions::Ti
 
     
     """
-    Number of boundary face  regions. Stored in an array in order
-    to keep the struct immutable.
+    Number of boundary face  regions.
     """
-    num_bfaceregions::Array{Int32,1}
+    num_bfaceregions::Ti
 
     
     """
     2D Array describing local scheme of distributions nodes per cell edge.
     """
-    celledgenodes::Array{Int32,2}
+    local_celledgenodes::Array{Ti,2}
 
+    """
+    Type of coordinate system
+    """
+    coord_type::CoordType
 end
 
 function Base.show(io::IO,grid::Grid{Tc}) where Tc
-    str=@sprintf("%s(dim_space=%d, num_nodes=%d, num_cells=%d, num_bfaces=%d)",
-                 typeof(grid),dim_space(grid),num_nodes(grid), num_cells(grid), num_bfaces(grid))
+    if num_edges(grid)>0
+        str=@sprintf("%s(dim_space=%d, num_nodes=%d, num_cells=%d, num_bfaces=%d, num_edges=%d)",
+                     typeof(grid),dim_space(grid),num_nodes(grid), num_cells(grid), num_bfaces(grid), num_edges(grid))
+    else
+        str=@sprintf("%s(dim_space=%d, num_nodes=%d, num_cells=%d, num_bfaces=%d)",
+                     typeof(grid),dim_space(grid),num_nodes(grid), num_cells(grid), num_bfaces(grid))
+        end
     println(io,str)
 end
+
+
+##########################################################
+"""
+  $(SIGNATURES)
+        
+  Main constructor for general grid from basic incidence information
+"""
+function Grid(coord::Array{Tc,2},
+              cellnodes::Array{Ti,2},
+              cellregions::Array{Ti,1},
+              bfacenodes::Array{Ti,2},
+              bfaceregions::Array{Ti,1}
+              ) where {Tc,Ti}
+    
+    dim::Ti=size(coord,1)
+    num_cellregions::Ti=maximum(cellregions)
+    num_bfaceregions::Ti=maximum(bfaceregions)
+    if dim==1
+        local_celledgenodes=reshape(Ti[1 2],:,1)
+    else
+        # see grid/simplex.h in pdelib
+        local_celledgenodes=zeros(Ti,2,3)
+        local_celledgenodes[1,1]=2
+        local_celledgenodes[2,1]=3
+
+        local_celledgenodes[1,2]=3
+        local_celledgenodes[2,2]=1
+        
+        local_celledgenodes[1,3]=1
+        local_celledgenodes[2,3]=2
+        
+        # local_celledgenodes= Ti[2 3 2 ;
+        #                         3 1 1]
+    end
+        
+    return Grid(coord,
+                cellnodes,
+                zeros(Ti,0,0),
+                zeros(Ti,0,0),
+                zeros(Ti,0,0),
+                cellregions,
+                bfacenodes,
+                bfaceregions,
+                num_cellregions,
+                num_bfaceregions,
+                local_celledgenodes,
+                cartesian)
+end
+
+cartesian!(grid)=grid.coord_type=cartesian
+cylindrical!(grid)=grid.coord_type=cylindrical
 
 ##########################################################
 """
@@ -155,8 +250,7 @@ grid marking control volumes: marked by `|`.
 ```
 
 """
-function Grid(X::Array{Tc,1}) where Tc
-
+function Grid(X::AbstractArray{Tc,1}) where {Tc}
     coord=reshape(X,1,length(X))
     cellnodes=zeros(Int32,2,length(X)-1)
     cellregions=zeros(Int32,length(X)-1)
@@ -165,23 +259,17 @@ function Grid(X::Array{Tc,1}) where Tc
         cellnodes[2,i]=i+1
         cellregions[i]=1
     end
-    bfacenodes=ElasticArray{Int32}(undef,1,2)
+    bfacenodes=Array{Int32}(undef,1,2)
     bfaceregions=zeros(Int32,2)
     bfacenodes[1,1]=1
     bfacenodes[1,2]=length(X)
     bfaceregions[1]=1
     bfaceregions[2]=2
-    num_cellregions=[maximum(cellregions)]
-    num_bfaceregions=[maximum(bfaceregions)]
-    celledgenodes=reshape(Int32[1 2],:,1)
-    return Grid{Tc}(coord,
-                    cellnodes,
-                    cellregions,
-                    bfacenodes,
-                    bfaceregions,
-                    num_cellregions,
-                    num_bfaceregions,
-                    celledgenodes)
+    return Grid(coord,
+                cellnodes,
+                cellregions,
+                bfacenodes,
+                bfaceregions)
 end
 
 
@@ -201,7 +289,7 @@ Boundary region numbers count counterclockwise:
 | west      |       4 |
 
 """
-function  Grid(X::Array{Tc,1},Y::Array{Tc,1}) where Tc
+function  Grid(X::AbstractArray{Tc,1},Y::AbstractArray{Tc,1}) where {Tc}
 
     
     function leq(x, x1, x2)
@@ -290,8 +378,8 @@ function  Grid(X::Array{Tc,1},Y::Array{Tc,1}) where Tc
     coord=zeros(Tc,2,num_nodes)
     cellnodes=zeros(Int32,3,num_cells)
     cellregions=zeros(Int32,num_cells)
-    bfacenodes=ElasticArray{Int32}(undef,2,num_bfacenodes)
-    resize!(bfacenodes,2,num_bfacenodes)
+    bfacenodes=Array{Int32}(undef,2,num_bfacenodes)
+#    resize!(bfacenodes,2,num_bfacenodes)
     bfaceregions=zeros(Int32,num_bfacenodes)
     
     ipoint=0
@@ -326,7 +414,7 @@ function  Grid(X::Array{Tc,1},Y::Array{Tc,1}) where Tc
             cellnodes[3,icell]=p00
             cellregions[icell]=1
         end
-   end
+    end
     @assert(icell==num_cells)
     
     #lazy way to  create boundary grid
@@ -342,23 +430,99 @@ function  Grid(X::Array{Tc,1},Y::Array{Tc,1}) where Tc
     end
     @assert(ibface==num_bfacenodes)
 
-    num_cellregions=[maximum(cellregions)]
-    num_bfaceregions=[maximum(bfaceregions)]
-    celledgenodes=[2 1 1 ;
-                   3 3 2]
 
-    return Grid{Tc}(coord,
-                    cellnodes,
-                    cellregions,
-                    bfacenodes,
-                    bfaceregions,
-                    num_cellregions,
-                    num_bfaceregions,
-                    celledgenodes)
+    return Grid(coord,
+                cellnodes,
+                cellregions,
+                bfacenodes,
+                bfaceregions)
 end
 
 
+######################################################
+"""
+    $(TYPEDSIGNATURES)
+    
+    Read grid from file.
+"""
+function Grid(fname::String;format="")
+    (fbase,fext)=splitext(fname)
+    if format==""
+        format=fext[2:end]
+    end
+    @assert format=="sg"
+    
+    tks=TokenStream(fname)
+    expecttoken(tks,"SimplexGrid")
+    version=parse(Float64,gettoken(tks))
+    version20=false;
 
+    if (version==2.0)
+        version20=true;
+    elseif (version==2.1)
+        version20=false;
+    else
+        error("Read grid: wrong format version: $(version)")
+    end
+
+    dim::Int32=0
+    coord=Array{Float64,2}(undef,0,0)
+    cells=Array{Int32,2}(undef,0,0)
+    regions=Array{Int32,1}(undef,0)
+    faces=Array{Int32,2}(undef,0,0)
+    bregions=Array{Int32,1}(undef,0)
+    while(true)
+        if (trytoken(tks,"DIMENSION"))
+            dim=parse(Int32,gettoken(tks));
+        elseif (trytoken(tks,"NODES")) 
+            nnodes=parse(Int32,gettoken(tks));
+            embdim=parse(Int32,gettoken(tks));
+            if(dim!=embdim)
+                error("Dimension error (DIMENSION $(dim)) in section NODES")
+            end
+            coord=Array{Float64,2}(undef,dim,nnodes)
+            for inode=1:nnodes
+                for idim=1:embdim
+                    coord[idim,inode]=parse(Float64,gettoken(tks))
+                end
+            end
+        elseif (trytoken(tks,"CELLS"))
+            ncells=parse(Int32,gettoken(tks));
+            cells=Array{Int32,2}(undef,dim+1,ncells)
+            regions=Array{Int32,1}(undef,ncells)
+            for icell=1:ncells
+                for inode=1:dim+1
+                    cells[inode,icell]=parse(Int32,gettoken(tks));
+                end
+                regions[icell]=parse(Int32,gettoken(tks));
+	        if version20
+		    for j=1:dim+1
+		        gettoken(tks);  # skip file format garbage
+                    end
+                end
+            end
+        elseif (trytoken(tks,"FACES"))
+            nfaces=parse(Int32,gettoken(tks));
+            faces=Array{Int32,2}(undef,dim,nfaces)
+            bregions=Array{Int32,1}(undef,nfaces)
+            for iface=1:nfaces
+                for inode=1:dim
+                    faces[inode,iface]=parse(Int32,gettoken(tks));
+                end
+                bregions[iface]=parse(Int32,gettoken(tks));
+	        if (version20)
+		    for j=1:dim+2
+		        gettoken(tks); #skip file format garbage
+                    end
+                end
+            end
+        else
+            expecttoken(tks,"END")
+            break
+        end
+    end
+    Grid(coord,cells,regions,faces,bregions);
+end
 
 ######################################################
 """
@@ -389,7 +553,7 @@ function cellmask!(grid::Grid,
             grid.cellregions[icell]=ireg
         end
     end
-    grid.num_cellregions[1]=max(num_cellregions(grid),ireg)
+    grid.num_cellregions=max(num_cellregions(grid),ireg)
 end
 
 
@@ -452,11 +616,120 @@ function bfacemask!(grid::Grid,
         end
     end
         
-    grid.num_bfaceregions[1]=max(num_bfaceregions(grid),ireg)
+    grid.num_bfaceregions=max(num_bfaceregions(grid),ireg)
+    return grid
 end
 
 
+################################################
+"""
+$(SIGNATURES)
 
+Prepare edge adjacencies (celledges, edgecells, edgenodes)
+""" 
+function prepare_edges!(grid)
+    Ti=eltype(grid.cellnodes)
+    
+    # Create cell-node incidence matrix
+    ext_cellnode_adj=ExtendableSparseMatrix{Ti,Ti}(num_nodes(grid),num_cells(grid))
+    for icell=1:num_cells(grid)
+        for inode=1:VoronoiFVM.num_nodes_per_cell(grid)
+            ext_cellnode_adj[grid.cellnodes[inode,icell],icell]=1
+        end
+    end
+    flush!(ext_cellnode_adj)
+    # Get SparseMatrixCSC from the ExtendableMatrix
+    cellnode_adj=ext_cellnode_adj.cscmatrix
+    
+    # Create node-node incidence matrix for neigboring
+    # nodes. 
+    nodenode_adj=cellnode_adj*transpose(cellnode_adj)
+
+    # To get unique edges, we set the lower triangular part
+    # including the diagonal to 0
+    for icol=1:length(nodenode_adj.colptr)-1
+        for irow=nodenode_adj.colptr[icol]:nodenode_adj.colptr[icol+1]-1
+            if nodenode_adj.rowval[irow]>=icol
+                nodenode_adj.nzval[irow]=0
+            end
+        end
+    end
+    dropzeros!(nodenode_adj)
+
+
+    # Now we know the number of edges and
+    nedges=length(nodenode_adj.nzval)
+
+    
+    if dim_space(grid)==2
+        # Let us do the Euler test (assuming no holes in the domain)
+        v=num_nodes(grid)
+        e=nedges
+        f=num_cells(grid)+1
+        @assert v-e+f==2
+    end
+    if dim_space(grid)==1
+        @assert nedges==num_cells(grid)
+    end
+    
+    # Calculate edge nodes and celledges
+    edgenodes=zeros(Ti,2,nedges)
+    celledges=zeros(Ti,3,num_cells(grid))
+    for icell=1:num_cells(grid)
+        for iedge=1:VoronoiFVM.num_edges_per_cell(grid)
+            n1=VoronoiFVM.celledgenode(grid,1,iedge,icell)
+            n2=VoronoiFVM.celledgenode(grid,2,iedge,icell)            
+
+            # We need to look in nodenod_adj for upper triangular part entries
+            # therefore, we need to swap accordingly before looking
+	    if (n1<n2)
+		n0=n1
+		n1=n2
+		n2=n0;
+	    end
+            
+            for irow=nodenode_adj.colptr[n1]:nodenode_adj.colptr[n1+1]-1
+                if nodenode_adj.rowval[irow]==n2
+                    # If the coresponding entry has been found, set its
+                    # value. Note that this introduces a different edge orientation
+                    # compared to the one found locally from cell data
+                    celledges[iedge,icell]=irow
+                    edgenodes[1,irow]=n1
+                    edgenodes[2,irow]=n2
+                end
+            end
+        end
+    end
+
+
+    # Create sparse incidence matrix for the cell-edge adjacency
+    ext_celledge_adj=ExtendableSparseMatrix{Ti,Ti}(nedges,num_cells(grid))
+    for icell=1:num_cells(grid)
+        for iedge=1:VoronoiFVM.num_edges_per_cell(grid)
+            ext_celledge_adj[celledges[iedge,icell],icell]=1
+        end
+    end
+    flush!(ext_celledge_adj)
+    celledge_adj=ext_celledge_adj.cscmatrix
+
+    # The edge cell matrix is the transpose
+    edgecell_adj=SparseMatrixCSC(transpose(celledge_adj))
+
+    # Get the adjaency array from the matrix
+    edgecells=zeros(Ti,2,nedges)
+    for icol=1:length(edgecell_adj.colptr)-1
+        ii=1
+        for irow=edgecell_adj.colptr[icol]:edgecell_adj.colptr[icol+1]-1
+            edgecells[ii,icol]=edgecell_adj.rowval[irow]
+            ii+=1
+        end
+    end
+    grid.edgecells=edgecells
+    grid.celledges=celledges
+    grid.edgenodes=edgenodes
+
+    return grid
+end
 
 
 ################################################
@@ -466,6 +739,10 @@ $(SIGNATURES)
 Calculate node volume  and voronoi surface contributions for cell.
 """ 
 function cellfactors!(grid::Grid{Tv},icell::Int,nodefac::Vector{Tv},edgefac::Vector{Tv}) where Tv
+
+    # Improve structure:
+    # https://www.juliabloggers.com/julia-dispatching-enum-versus-type/
+
 
     function cellfac1d!(grid::Grid{Tv},icell::Int,nodefac::Vector{Tv},edgefac::Vector{Tv}) where Tv
         K=cellnode(grid,1,icell)
@@ -477,6 +754,26 @@ function cellfactors!(grid::Grid{Tv},icell::Int,nodefac::Vector{Tv},edgefac::Vec
         nodefac[2]=d/2
         edgefac[1]=1/d
     end
+
+    function cellfac1dcyl!(grid::Grid{Tv},icell::Int,nodefac::Vector{Tv},edgefac::Vector{Tv}) where Tv
+        K=cellnode(grid,1,icell)
+        L=cellnode(grid,2,icell)
+        xK=nodecoord(grid,K)
+        xL=nodecoord(grid,L)
+        r0=xK[1]
+        r1=xL[1]
+        if r1<r0
+            r0=xL[1]
+            r1=xK[1]
+        end
+        rhalf=0.5*(r1+r0);
+        πv::Tv=π
+        # cpar[1]= πv*(r1*r1-r0*r0);         # circular volume
+        nodefac[1]= πv*(rhalf*rhalf-r0*r0);   # circular volume between midline and boundary
+        nodefac[2]= πv*(r1*r1-rhalf*rhalf);   # circular volume between midline and boundary
+        edgefac[1]= 2.0*πv*rhalf/(r1-r0);     # circular surface / width
+    end
+    
     
     function cellfac2d!(grid::Grid{Tv},icell::Int,npar::Vector{Tv},epar::Vector{Tv}) where Tv
         i1=cellnode(grid,1,icell)
@@ -520,12 +817,89 @@ function cellfactors!(grid::Grid{Tv},icell::Int,nodefac::Vector{Tv},edgefac::Vec
         npar[2]= (epar[1]*dd1+epar[3]*dd3)*0.25
         npar[3]= (epar[2]*dd2+epar[1]*dd1)*0.25
     end                              
+
+
+    function cellfac2dcyl!(grid::Grid{Tv},icell::Int,npar::Vector{Tv},epar::Vector{Tv}) where Tv
+        function area2d(coord1, coord2, coord3)
+            V11= coord2[1]- coord1[1]
+            V21= coord2[2]- coord1[2]
+            
+            V12= coord3[1]- coord1[1]
+            V22= coord3[2]- coord1[2]
+            
+            V13= coord3[1]- coord2[1]
+            V23= coord3[2]- coord2[2]
+            
+            # Compute determinant 
+            det=V11*V22 - V12*V21
+            area=abs(0.5*det)
+        end
+        
+
+        πv::Tv=π
+        i1=cellnode(grid,1,icell)
+        i2=cellnode(grid,2,icell)
+        i3=cellnode(grid,3,icell)
+        
+        coord=grid.coord
+
+        # Fill matrix of edge vectors
+        V11= grid.coord[1,i2]- grid.coord[1,i1]
+        V21= grid.coord[2,i2]- grid.coord[2,i1]
+        
+        V12= grid.coord[1,i3]- grid.coord[1,i1]
+        V22= grid.coord[2,i3]- grid.coord[2,i1]
+        
+        V13= grid.coord[1,i3]- grid.coord[1,i2]
+        V23= grid.coord[2,i3]- grid.coord[2,i2]
+   
+        # Compute determinant 
+        det=V11*V22 - V12*V21
+        area=0.5*det
+
+        # Integrate R over triangle (via quadrature rule)
+        vol=2.0*πv*area*(coord[1,i1]+coord[1,i2]+coord[1,i3])/3.0
+
+        # squares of edge lengths
+        dd1=V13*V13+V23*V23 # l32
+        dd2=V12*V12+V22*V22 # l31
+        dd3=V11*V11+V21*V21 # l21
+
+        emid23=[0.5*(grid.coord[1,i3]+grid.coord[1,i2]),
+                0.5*(grid.coord[2,i3]+grid.coord[2,i2])]
+
+        emid13=[0.5*(grid.coord[1,i1]+grid.coord[1,i3]),
+                0.5*(grid.coord[2,i1]+grid.coord[2,i3])]
+
+        emid12=[0.5*(grid.coord[1,i1]+grid.coord[1,i2]),
+                0.5*(grid.coord[2,i1]+grid.coord[2,i2])]
+
+        cc=Vector{Float64}(undef,2) # TODO: replace this allocation + views
+        tricircumcenter!(cc,coord[:,i1],coord[:,i2],coord[:,i3])
+
+        r(p)=p[1]
+        z(p)=p[2]
+        sq(x)=x*x
+        epar[1]= πv*(r(cc)+r(emid23))*sqrt(sq(r(cc)-r(emid23))+sq(z(cc)-z(emid23)))/sqrt(dd1);
+        epar[2]= πv*(r(cc)+r(emid13))*sqrt(sq(r(cc)-r(emid13))+sq(z(cc)-z(emid13)))/sqrt(dd2);
+        epar[3]= πv*(r(cc)+r(emid12))*sqrt(sq(r(cc)-r(emid12))+sq(z(cc)-z(emid12)))/sqrt(dd3);
+
+        rintegrate(coord1, coord2, coord3)=2.0*πv*area2d(coord1,coord2,coord3)*(coord1[1]+coord2[1]+coord3[1])/3.0
+        npar[1]=rintegrate(coord[:,i1],cc,emid13)+rintegrate(coord[:,i1],cc,emid12)
+        npar[2]=rintegrate(coord[:,i2],cc,emid23)+rintegrate(coord[:,i2],cc,emid12)
+        npar[3]=rintegrate(coord[:,i3],cc,emid13)+rintegrate(coord[:,i3],cc,emid23)
+    end                              
+
     
     
-    if dim_space(grid)==1
+    if dim_space(grid)==1 && grid.coord_type==cartesian
         cellfac1d!(grid,icell,nodefac,edgefac)
-    elseif dim_space(grid)==2
+    elseif dim_space(grid)==1 && grid.coord_type==cylindrical
+        cellfac1dcyl!(grid,icell,nodefac,edgefac)
+    elseif dim_space(grid)==2&& grid.coord_type==cartesian
         cellfac2d!(grid,icell,nodefac,edgefac)
+    elseif dim_space(grid)==2&& grid.coord_type==cylindrical
+        cellfac2dcyl!(grid,icell,nodefac,edgefac)
     end
 end
 
@@ -602,7 +976,16 @@ $(TYPEDSIGNATURES)
 
 Index of cell edge node.
 """
-celledgenode(grid::Grid,inode,iedge,icell)=grid.cellnodes[grid.celledgenodes[inode,iedge],icell]
+celledge(grid::Grid,iedge,icell)=grid.celledges[iedge,icell]
+
+
+################################################
+"""
+$(TYPEDSIGNATURES)
+
+Index of cell edge node.
+"""
+celledgenode(grid::Grid,inode,iedge,icell)=grid.cellnodes[grid.local_celledgenodes[inode,iedge],icell]
 
 ################################################
 """
@@ -610,7 +993,7 @@ $(TYPEDSIGNATURES)
     
 Number of edges per grid cell.
 """
-num_edges_per_cell(grid::Grid)= size(grid.celledgenodes,2)
+num_edges_per_cell(grid::Grid)= size(grid.local_celledgenodes,2)
 
 ################################################
 """
@@ -634,7 +1017,7 @@ $(TYPEDSIGNATURES)
 
 Number of cell regions in grid.
 """
-num_cellregions(grid::Grid)= grid.num_cellregions[1]
+num_cellregions(grid::Grid)= grid.num_cellregions
 
 ################################################
 """
@@ -642,9 +1025,19 @@ $(TYPEDSIGNATURES)
 
 Number of boundary face regions in grid.
 """
-num_bfaceregions(grid::Grid)=grid.num_bfaceregions[1]
+num_bfaceregions(grid::Grid)=grid.num_bfaceregions
 
+################################################
+"""
+$(TYPEDSIGNATURES)
 
+Provide information for PyPlot triangulation data for plotting.
+Needs to be splatted. Use it e.g. like
+```
+    PyPlot.trisurf(tridata(g)...,U)
+```
+"""
+tridata(g)=g.coord[1,:], g.coord[2,:],transpose(g.cellnodes.-1)
 
 ##################################################################
 """

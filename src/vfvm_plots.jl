@@ -42,13 +42,14 @@ function fvmplot!(p,grid::Grid)
         end
         
         for ibface=1:num_bfaces(grid)
-            rgb=frgb(grid.bfaceregions[ibface],num_bfaceregions(grid))
-            coord1=nodecoord(grid,bfacenode(grid,1,ibface))
-            x1=coord1[1]
-            Plots.plot!(p,[x1,x1],[-2*h,2*h],linewidth=3.0,color=rgb,label="")
+            if grid.bfaceregions[ibface]>0
+                rgb=frgb(grid.bfaceregions[ibface],num_bfaceregions(grid))
+                coord1=nodecoord(grid,bfacenode(grid,1,ibface))
+                x1=coord1[1]
+                Plots.plot!(p,[x1,x1],[-2*h,2*h],linewidth=3.0,color=rgb,label="")
+            end
         end
     end
-
 
     if dim_space(grid)==2
         for icell=1:num_cells(grid)
@@ -56,6 +57,7 @@ function fvmplot!(p,grid::Grid)
             coord1=nodecoord(grid,cellnode(grid,1,icell))
             coord2=nodecoord(grid,cellnode(grid,2,icell))
             coord3=nodecoord(grid,cellnode(grid,3,icell))
+            # https://github.com/JuliaPlots/Plots.jl/issues/605    
             tri=Plots.Shape([coord1[1],coord2[1], coord3[1]],[coord1[2],coord2[2],coord3[2]])
             Plots.plot!(p,tri,color=rgb,label="")
         end
